@@ -8,13 +8,13 @@ This tool subscribes to a WebSocket firehose of moderation labels and automatica
 
 ## Features
 
-- 🔥 Real-time firehose subscription with DAG-CBOR decoding
-- 🔄 Automatic reconnection with exponential backoff
-- 📋 Multi-list management based on label mappings
-- 🚫 Deduplication using Redis cache
-- ⚡ Rate limiting to respect Bluesky API limits
-- 🐳 Docker and docker-compose ready
-- 📊 Structured logging with pino
+- Real-time firehose subscription with DAG-CBOR decoding
+- Automatic reconnection with exponential backoff
+- Multi-list management based on label mappings
+- Deduplication using Redis cache
+- Rate limiting to respect Bluesky API limits
+- Docker and docker-compose ready
+- Structured logging with pino
 
 ## Prerequisites
 
