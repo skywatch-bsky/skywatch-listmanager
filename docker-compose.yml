@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: skywatch-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - skywatch-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  app:
+    build: .
+    container_name: skywatch-listmanager
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - skywatch-network
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+
+volumes:
+  redis-data:
+
+networks:
+  skywatch-network:
+    driver: bridge
