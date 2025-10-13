@@ -26,6 +26,8 @@ services:
         condition: service_healthy
     networks:
       - skywatch-network
+    volumes:
+      - ./cursor.txt:/app/cursor.txt
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
