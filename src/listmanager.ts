@@ -33,7 +33,10 @@ export const addToList = async (label: string, did: string) => {
           createdAt: new Date().toISOString(),
         },
       });
-      logger.info({ label: list.label, did }, "Successfully added user to list");
+      logger.info(
+        { label: list.label, did },
+        "Successfully added user to list",
+      );
     } catch (e: any) {
       if (e.message?.includes("RecordAlreadyExists")) {
         logger.info({ label: list.label, did }, "User already in list");

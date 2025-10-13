@@ -1,4 +1,5 @@
-import { decode } from "@atcute/cbor";
+import { decode, decodeFirst } from "@atcute/cbor";
+import { readFileSync, writeFileSync } from "fs";
 import { WSS_URL } from "./config.js";
 import { LISTS } from "./constants.js";
 import { addToList, removeFromList } from "./listmanager.js";
@@ -9,8 +10,10 @@ import { LabelEvent } from "./types.js";
 let ws: WebSocket | null = null;
 let reconnectTimeout: NodeJS.Timeout | null = null;
 let reconnectAttempts = 0;
+let cursor: string = "";
 const MAX_RECONNECT_DELAY = 60000;
 const INITIAL_RECONNECT_DELAY = 1000;
+const CURSOR_FILE = "./cursor.txt";
 
 function getReconnectDelay(): number {
   const delay = Math.min(
@@ -64,36 +67,74 @@ async function handleLabelEvent(event: LabelEvent): Promise<void> {
   }
 }
 
+function saveCursor(seq: string): void {
+  try {
+    cursor = seq;
+    writeFileSync(CURSOR_FILE, seq, "utf8");
+    logger.debug({ cursor: seq }, "Saved cursor");
+  } catch (err) {
+    logger.warn({ err }, "Failed to save cursor");
+  }
+}
+
+function loadCursor(): string {
+  try {
+    const saved = readFileSync(CURSOR_FILE, "utf8").trim();
+    logger.info({ cursor: saved }, "Loaded cursor from file");
+    return saved;
+  } catch (err) {
+    logger.info("No cursor file found, starting from live");
+    return "";
+  }
+}
+
 function parseMessage(data: any): void {
   try {
-    let parsed: any;
+    let buffer: Uint8Array;
 
     if (data instanceof ArrayBuffer) {
-      parsed = decode(new Uint8Array(data));
+      buffer = new Uint8Array(data);
     } else if (data instanceof Uint8Array) {
-      parsed = decode(data);
+      buffer = data;
     } else if (typeof data === "string") {
       try {
-        parsed = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        if (parsed.seq) {
+          saveCursor(parsed.seq.toString());
+        }
+        processLabels(parsed);
+        return;
       } catch {
         logger.warn("Received non-JSON string message");
         return;
       }
     } else {
-      parsed = data;
+      processLabels(data);
+      return;
     }
 
-    if (parsed.labels && Array.isArray(parsed.labels)) {
-      for (const label of parsed.labels) {
-        handleLabelEvent(label as LabelEvent);
-      }
-    } else if (parsed.label) {
-      handleLabelEvent(parsed.label as LabelEvent);
-    } else {
-      logger.debug({ parsed }, "Message does not contain label data");
+    const [header, remainder] = decodeFirst(buffer);
+    const [body] = decodeFirst(remainder);
+
+    if (body && typeof body === "object" && "seq" in body) {
+      saveCursor(body.seq.toString());
     }
+
+    processLabels(body);
   } catch (err) {
     logger.error({ err }, "Error parsing message");
+  }
+}
+
+function processLabels(parsed: any): void {
+  if (parsed.labels && Array.isArray(parsed.labels)) {
+    for (const label of parsed.labels) {
+      handleLabelEvent(label as LabelEvent);
+    }
+  } else if (parsed.label) {
+    handleLabelEvent(parsed.label as LabelEvent);
+  } else {
+    logger.debug({ parsed }, "Message does not contain label data");
   }
 }
 
@@ -103,9 +144,10 @@ function connect(): void {
     return;
   }
 
-  logger.info({ url: WSS_URL }, "Connecting to firehose");
+  const url = cursor ? `${WSS_URL}?cursor=${cursor}` : WSS_URL;
+  logger.info({ url, cursor }, "Connecting to firehose");
 
-  ws = new WebSocket(WSS_URL);
+  ws = new WebSocket(url);
 
   ws.addEventListener("open", () => {
     logger.info("Firehose connection established");
@@ -140,6 +182,7 @@ function scheduleReconnect(): void {
 }
 
 export function startFirehose(): void {
+  cursor = loadCursor();
   connect();
 }
 

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(bun pm ls:*)",
-      "Bash(npm view:*)"
+      "Bash(npm view:*)",
+      "mcp__git-mcp-server__git_status",
+      "mcp__git-mcp-server__git_set_working_dir"
     ],
     "deny": [],
     "ask": []
