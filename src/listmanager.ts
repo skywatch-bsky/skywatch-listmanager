@@ -19,7 +19,7 @@ export const addToList = async (label: string, did: string) => {
   logger.info({ label: list.label, did }, "Adding user to list");
 
   const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
-  const rkey = `${list.rkey}-${did.replace(/:/g, "_")}`;
+  const rkey = `${list.rkey}${did.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   await limit(async () => {
     try {
@@ -68,40 +68,51 @@ export const removeFromList = async (label: string, did: string) => {
 
   await limit(async () => {
     // To remove a list item, we need to know its rkey.
-    // In the old system, the rkey was a random TID, so we had to list records to find it.
-    // In the new system, we create records with a deterministic rkey.
-    // The new `removeFromList` will first try to delete using the deterministic rkey.
-    // If that fails, it will fall back to the old (slow) method to support deleting
-    // items that were created before this change.
+    // We try multiple deterministic rkey formats, then fall back to listing records.
+    // Format priority:
+    //   1. New alphanumeric format: {listRkey}{didAlphanumeric}
+    //   2. Old format with separators: {listRkey}-{didWithUnderscores}
+    //   3. Legacy: list all records and find by subject/list match
 
-    // 1. Try deleting with the new deterministic rkey
-    const deterministicRkey = `${list.rkey}-${did.replace(/:/g, "_")}`;
-    let recordDeleted = false;
+    const alphanumericRkey = `${list.rkey}${did.replace(/[^a-zA-Z0-9]/g, "")}`;
+    const legacySeparatorRkey = `${list.rkey}-${did.replace(/:/g, "_")}`;
 
+    // 1. Try new alphanumeric format
     try {
       await agent.com.atproto.repo.deleteRecord({
         repo: DID,
         collection: "app.bsky.graph.listitem",
-        rkey: deterministicRkey,
+        rkey: alphanumericRkey,
       });
       logger.info(
         { label: list.label, did },
-        "Successfully removed user from list (deterministic rkey)",
+        "Successfully removed user from list (alphanumeric rkey)",
       );
-      recordDeleted = true;
-    } catch (e) {
-      // This is expected to fail if the record uses the old rkey scheme, or if it doesn't exist at all.
-      // We'll proceed to the fallback.
-    }
-
-    if (recordDeleted) {
       return;
+    } catch (e) {
+      // Expected to fail if record uses different format
     }
 
-    // 2. Fallback to old method for legacy records
+    // 2. Try old separator format
+    try {
+      await agent.com.atproto.repo.deleteRecord({
+        repo: DID,
+        collection: "app.bsky.graph.listitem",
+        rkey: legacySeparatorRkey,
+      });
+      logger.info(
+        { label: list.label, did },
+        "Successfully removed user from list (legacy separator rkey)",
+      );
+      return;
+    } catch (e) {
+      // Expected to fail if record uses different format
+    }
+
+    // 3. Fallback to listing records
     logger.info(
       { label: list.label, did },
-      "Deterministic delete failed, trying fallback for legacy record",
+      "Deterministic deletes failed, trying fallback for legacy record",
     );
 
     try {
