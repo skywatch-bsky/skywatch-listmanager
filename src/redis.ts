@@ -73,3 +73,16 @@ export async function markProcessed(
     logger.warn({ err, did, label, neg }, "Error marking as processed in Redis");
   }
 }
+
+export async function clearProcessed(
+  did: string,
+  label: string,
+  neg: boolean,
+): Promise<void> {
+  try {
+    const oppositeKey = getCacheKey(did, label, !neg);
+    await redisClient.del(oppositeKey);
+  } catch (err) {
+    logger.warn({ err, did, label, neg }, "Error clearing opposite state in Redis");
+  }
+}

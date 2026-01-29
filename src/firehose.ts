@@ -4,7 +4,7 @@ import { WSS_URL } from "./config.js";
 import { LISTS } from "./constants.js";
 import { addToList, removeFromList } from "./listmanager.js";
 import { logger } from "./logger.js";
-import { hasProcessed, markProcessed } from "./redis.js";
+import { clearProcessed, hasProcessed, markProcessed } from "./redis.js";
 import { LabelEvent } from "./types.js";
 
 let ws: WebSocket | null = null;
@@ -62,6 +62,7 @@ async function handleLabelEvent(event: LabelEvent): Promise<void> {
     }
 
     await markProcessed(did, event.val, neg);
+    await clearProcessed(did, event.val, neg);
   } catch (err) {
     logger.error({ err, event }, "Error handling label event");
   }

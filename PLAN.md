@@ -280,6 +280,26 @@ export interface CacheKey {
 - Monitor Redis memory usage
 - Monitor log output for errors
 
+## Bugfix: Redis Label State Cleanup (2026-01-29)
+
+### Problem
+When a label is applied and then removed, Redis retains both states:
+1. Add event → caches `label:{did}:{label}:false`
+2. Remove event → caches `label:{did}:{label}:true`
+
+These are **separate keys**. The `false` key persists, so future add events get blocked.
+
+### Solution
+When processing a label event, also delete the **opposite** state key. This allows bidirectional transitions:
+- Add label → marks `false`, clears `true` (can be removed later)
+- Remove label → marks `true`, clears `false` (can be re-added later)
+
+### Changes
+1. `src/redis.ts` - Add `clearProcessed()` function to delete opposite state
+2. `src/firehose.ts` - Call `clearProcessed()` after `markProcessed()`
+
+---
+
 ## Success Criteria
 
 - [x] Successfully connects to firehose WebSocket
