@@ -6,6 +6,14 @@ export const LISTS: List[] = [
     rkey: "3m47iz2a6gb2u",
   },
   {
+    label: "inauthentic-fundraising",
+    rkey: "3mhrtq24nuk2u",
+  },
+  {
+    label: "spam",
+    rkey: "3mhrttdaifm23",
+  },
+  {
     label: "blue-heart-emoji",
     rkey: "3lfbtgosyyi22",
   },
