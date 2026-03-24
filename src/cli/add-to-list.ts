@@ -2,6 +2,7 @@ import { login } from "../agent.js";
 import { LISTS } from "../constants.js";
 import { addToList } from "../listmanager.js";
 import { logger } from "../logger.js";
+import { connectRedis, disconnectRedis } from "../redis.js";
 
 function printUsage(): void {
   console.log("Usage: npx tsx src/cli/add-to-list.ts <did> <label>");
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   }
 
   try {
+    await connectRedis();
     await login();
     logger.info("Authenticated with Bluesky");
 
@@ -43,6 +45,8 @@ async function main(): Promise<void> {
   } catch (err) {
     logger.fatal({ err }, "Failed to add user to list");
     process.exit(1);
+  } finally {
+    await disconnectRedis();
   }
 }
 

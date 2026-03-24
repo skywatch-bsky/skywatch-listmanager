@@ -3,6 +3,11 @@ import { DID } from "./config.js";
 import { LISTS } from "./constants.js";
 import { limit } from "./limits.js";
 import { logger } from "./logger.js";
+import {
+  getListItemRkey,
+  setListItemRkey,
+  deleteListItemRkey,
+} from "./redis.js";
 
 export const addToList = async (label: string, did: string) => {
   await isLoggedIn;
@@ -16,25 +21,31 @@ export const addToList = async (label: string, did: string) => {
     return;
   }
 
+  const existingRkey = await getListItemRkey(label, did);
+  if (existingRkey) {
+    logger.info({ label: list.label, did }, "User already in list (per index)");
+    return;
+  }
+
   logger.info({ label: list.label, did }, "Adding user to list");
 
   const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
-  const rkey = `${list.rkey}${did.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   await limit(async () => {
     try {
-      await agent.com.atproto.repo.createRecord({
+      const response = await agent.com.atproto.repo.createRecord({
         collection: "app.bsky.graph.listitem",
         repo: DID,
-        rkey: rkey,
         record: {
           subject: did,
           list: listUri,
           createdAt: new Date().toISOString(),
         },
       });
+      const rkey = response.data.uri.split("/").pop()!;
+      await setListItemRkey(label, did, rkey);
       logger.info(
-        { label: list.label, did },
+        { label: list.label, did, rkey },
         "Successfully added user to list",
       );
     } catch (e: any) {
@@ -64,56 +75,33 @@ export const removeFromList = async (label: string, did: string) => {
 
   logger.info({ label: list.label, did }, "Removing user from list");
 
-  const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
-
   await limit(async () => {
-    // To remove a list item, we need to know its rkey.
-    // We try multiple deterministic rkey formats, then fall back to listing records.
-    // Format priority:
-    //   1. New alphanumeric format: {listRkey}{didAlphanumeric}
-    //   2. Old format with separators: {listRkey}-{didWithUnderscores}
-    //   3. Legacy: list all records and find by subject/list match
-
-    const alphanumericRkey = `${list.rkey}${did.replace(/[^a-zA-Z0-9]/g, "")}`;
-    const legacySeparatorRkey = `${list.rkey}-${did.replace(/:/g, "_")}`;
-
-    // 1. Try new alphanumeric format
-    try {
-      await agent.com.atproto.repo.deleteRecord({
-        repo: DID,
-        collection: "app.bsky.graph.listitem",
-        rkey: alphanumericRkey,
-      });
-      logger.info(
-        { label: list.label, did },
-        "Successfully removed user from list (alphanumeric rkey)",
-      );
-      return;
-    } catch (e) {
-      // Expected to fail if record uses different format
+    // 1. Try indexed rkey from Redis
+    const indexedRkey = await getListItemRkey(label, did);
+    if (indexedRkey) {
+      try {
+        await agent.com.atproto.repo.deleteRecord({
+          repo: DID,
+          collection: "app.bsky.graph.listitem",
+          rkey: indexedRkey,
+        });
+        await deleteListItemRkey(label, did);
+        logger.info(
+          { label: list.label, did },
+          "Successfully removed user from list (indexed rkey)",
+        );
+        return;
+      } catch (e) {
+        logger.warn(
+          { err: e, label: list.label, did, rkey: indexedRkey },
+          "Indexed rkey delete failed, falling back to listing",
+        );
+        await deleteListItemRkey(label, did);
+      }
     }
 
-    // 2. Try old separator format
-    try {
-      await agent.com.atproto.repo.deleteRecord({
-        repo: DID,
-        collection: "app.bsky.graph.listitem",
-        rkey: legacySeparatorRkey,
-      });
-      logger.info(
-        { label: list.label, did },
-        "Successfully removed user from list (legacy separator rkey)",
-      );
-      return;
-    } catch (e) {
-      // Expected to fail if record uses different format
-    }
-
-    // 3. Fallback to listing records
-    logger.info(
-      { label: list.label, did },
-      "Deterministic deletes failed, trying fallback for legacy record",
-    );
+    // 2. Fallback: list records and find by subject + list match
+    const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
 
     try {
       let cursor: string | undefined;
@@ -154,13 +142,13 @@ export const removeFromList = async (label: string, did: string) => {
       } else {
         logger.warn(
           { label: list.label, did },
-          "List item not found, user may not be in list (checked via fallback)",
+          "List item not found, user may not be in list",
         );
       }
     } catch (e) {
       logger.error(
         { err: e, label: list.label, did },
-        "Failed to remove user from list (in fallback)",
+        "Failed to remove user from list (fallback)",
       );
     }
   });

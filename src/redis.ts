@@ -86,3 +86,42 @@ export async function clearProcessed(
     logger.warn({ err, did, label, neg }, "Error clearing opposite state in Redis");
   }
 }
+
+function getListItemKey(label: string, did: string): string {
+  return `listitem:${label}:${did}`;
+}
+
+export async function getListItemRkey(
+  label: string,
+  did: string,
+): Promise<string | null> {
+  try {
+    return await redisClient.get(getListItemKey(label, did));
+  } catch (err) {
+    logger.warn({ err, label, did }, "Error reading list item rkey from Redis");
+    return null;
+  }
+}
+
+export async function setListItemRkey(
+  label: string,
+  did: string,
+  rkey: string,
+): Promise<void> {
+  try {
+    await redisClient.set(getListItemKey(label, did), rkey);
+  } catch (err) {
+    logger.warn({ err, label, did, rkey }, "Error storing list item rkey in Redis");
+  }
+}
+
+export async function deleteListItemRkey(
+  label: string,
+  did: string,
+): Promise<void> {
+  try {
+    await redisClient.del(getListItemKey(label, did));
+  } catch (err) {
+    logger.warn({ err, label, did }, "Error deleting list item rkey from Redis");
+  }
+}
