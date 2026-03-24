@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { readFileSync } from "fs";
 import { AtpAgent } from "@atproto/api";
 import { LISTS } from "../constants.js";
@@ -6,6 +9,8 @@ const BSKY_HANDLE = process.env.BSKY_HANDLE || "";
 const BSKY_PASSWORD = process.env.BSKY_PASSWORD || "";
 const DID = process.env.DID || "";
 const PDS = process.env.PDS || "bsky.social";
+
+const RATE_LIMIT_BUFFER = 50;
 
 function printUsage(): void {
   console.log("Usage: npx tsx src/cli/batch-add-to-list.ts <file> <label>");
@@ -31,6 +36,33 @@ function parseDidsFromFile(filePath: string): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
+
+async function waitForRateLimit(
+  remaining: number | null,
+  reset: number | null,
+): Promise<void> {
+  if (remaining === null || reset === null) return;
+  if (remaining > RATE_LIMIT_BUFFER) return;
+
+  const now = Math.floor(Date.now() / 1000);
+  const waitSeconds = Math.max(reset - now, 1);
+  console.log(
+    `Rate limit low (${remaining} remaining), waiting ${waitSeconds}s until reset...`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+}
+
+function parseRateLimitHeaders(headers: Record<string, string | undefined>): {
+  remaining: number | null;
+  reset: number | null;
+} {
+  const remaining = headers["ratelimit-remaining"];
+  const reset = headers["ratelimit-reset"];
+  return {
+    remaining: remaining ? parseInt(remaining, 10) : null,
+    reset: reset ? parseInt(reset, 10) : null,
+  };
 }
 
 async function main(): Promise<void> {
@@ -83,7 +115,7 @@ async function main(): Promise<void> {
 
   for (const did of dids) {
     try {
-      await agent.com.atproto.repo.createRecord({
+      const response = await agent.com.atproto.repo.createRecord({
         collection: "app.bsky.graph.listitem",
         repo: DID,
         record: {
@@ -93,20 +125,46 @@ async function main(): Promise<void> {
         },
       });
       succeeded++;
-      console.log(`[${succeeded + failed + skipped}/${dids.length}] added ${did}`);
+      console.log(
+        `[${succeeded + failed + skipped}/${dids.length}] added ${did}`,
+      );
+
+      const { remaining, reset } = parseRateLimitHeaders(response.headers);
+      await waitForRateLimit(remaining, reset);
     } catch (e: any) {
       if (e.message?.includes("RecordAlreadyExists")) {
         skipped++;
-        console.log(`[${succeeded + failed + skipped}/${dids.length}] already listed ${did}`);
+        console.log(
+          `[${succeeded + failed + skipped}/${dids.length}] already listed ${did}`,
+        );
+      } else if (e.headers) {
+        const { remaining, reset } = parseRateLimitHeaders(e.headers);
+        if (e.status === 429) {
+          console.log(
+            `[${succeeded + failed + skipped}/${dids.length}] rate limited on ${did}, waiting...`,
+          );
+          await waitForRateLimit(0, reset);
+          failed++;
+        } else {
+          failed++;
+          console.error(
+            `[${succeeded + failed + skipped}/${dids.length}] FAILED ${did}: ${e.message}`,
+          );
+          await waitForRateLimit(remaining, reset);
+        }
       } else {
         failed++;
-        console.error(`[${succeeded + failed + skipped}/${dids.length}] FAILED ${did}: ${e.message}`);
+        console.error(
+          `[${succeeded + failed + skipped}/${dids.length}] FAILED ${did}: ${e.message}`,
+        );
       }
     }
   }
 
   console.log("");
-  console.log(`Done: ${succeeded} added, ${skipped} already listed, ${failed} failed (${dids.length} total)`);
+  console.log(
+    `Done: ${succeeded} added, ${skipped} already listed, ${failed} failed (${dids.length} total)`,
+  );
 }
 
 main();
