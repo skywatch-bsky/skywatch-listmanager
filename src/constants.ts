@@ -6,10 +6,6 @@ export const LISTS: List[] = [
     rkey: "3m47iz2a6gb2u",
   },
   {
-    label: "intolerance",
-    rkey: "3m5rsuo7uov2r",
-  },
-  {
     label: "blue-heart-emoji",
     rkey: "3lfbtgosyyi22",
   },
@@ -56,5 +52,9 @@ export const LISTS: List[] = [
   {
     label: "hammer-sickle",
     rkey: "3l4ue6w2aur2v",
+  },
+  {
+    label: "intolerance",
+    rkey: "3m5rsuo7uov2r",
   },
 ];
