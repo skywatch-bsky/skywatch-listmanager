@@ -1,9 +1,11 @@
 import { readFileSync } from "fs";
-import { login } from "../agent.js";
+import { AtpAgent } from "@atproto/api";
 import { LISTS } from "../constants.js";
-import { addToList } from "../listmanager.js";
-import { logger } from "../logger.js";
-import { connectRedis, disconnectRedis } from "../redis.js";
+
+const BSKY_HANDLE = process.env.BSKY_HANDLE || "";
+const BSKY_PASSWORD = process.env.BSKY_PASSWORD || "";
+const DID = process.env.DID || "";
+const PDS = process.env.PDS || "bsky.social";
 
 function printUsage(): void {
   console.log("Usage: npx tsx src/cli/batch-add-to-list.ts <file> <label>");
@@ -41,7 +43,7 @@ async function main(): Promise<void> {
 
   const list = LISTS.find((l) => l.label === label);
   if (!list) {
-    logger.error({ label }, "List not found for label");
+    console.error(`List not found for label: ${label}`);
     console.log("");
     console.log("Available labels:");
     for (const l of LISTS) {
@@ -50,49 +52,61 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (!BSKY_HANDLE || !BSKY_PASSWORD || !DID) {
+    console.error(
+      "Missing required env vars: BSKY_HANDLE, BSKY_PASSWORD, DID",
+    );
+    process.exit(1);
+  }
+
   let dids: string[];
   try {
     dids = parseDidsFromFile(filePath);
   } catch (err) {
-    logger.fatal({ err, filePath }, "Failed to read DIDs file");
+    console.error(`Failed to read file: ${filePath}`, err);
     process.exit(1);
   }
 
   if (dids.length === 0) {
-    logger.warn("No DIDs found in file");
+    console.log("No DIDs found in file");
     process.exit(0);
   }
 
-  logger.info({ label, count: dids.length }, "Starting batch add");
+  const agent = new AtpAgent({ service: `https://${PDS}` });
+  await agent.login({ identifier: BSKY_HANDLE, password: BSKY_PASSWORD });
+  console.log("Authenticated");
 
-  try {
-    await connectRedis();
-    await login();
-    logger.info("Authenticated with Bluesky");
+  const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
+  let succeeded = 0;
+  let failed = 0;
+  let skipped = 0;
 
-    let succeeded = 0;
-    let failed = 0;
-
-    for (const did of dids) {
-      try {
-        await addToList(label, did, { force: true });
-        succeeded++;
-      } catch (err) {
-        logger.error({ err, did }, "Failed to add DID");
+  for (const did of dids) {
+    try {
+      await agent.com.atproto.repo.createRecord({
+        collection: "app.bsky.graph.listitem",
+        repo: DID,
+        record: {
+          subject: did,
+          list: listUri,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      succeeded++;
+      console.log(`[${succeeded + failed + skipped}/${dids.length}] added ${did}`);
+    } catch (e: any) {
+      if (e.message?.includes("RecordAlreadyExists")) {
+        skipped++;
+        console.log(`[${succeeded + failed + skipped}/${dids.length}] already listed ${did}`);
+      } else {
         failed++;
+        console.error(`[${succeeded + failed + skipped}/${dids.length}] FAILED ${did}: ${e.message}`);
       }
     }
-
-    logger.info(
-      { total: dids.length, succeeded, failed },
-      "Batch add complete",
-    );
-  } catch (err) {
-    logger.fatal({ err }, "Batch add failed");
-    process.exit(1);
-  } finally {
-    await disconnectRedis();
   }
+
+  console.log("");
+  console.log(`Done: ${succeeded} added, ${skipped} already listed, ${failed} failed (${dids.length} total)`);
 }
 
 main();

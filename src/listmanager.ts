@@ -9,11 +9,7 @@ import {
   deleteListItemRkey,
 } from "./redis.js";
 
-export const addToList = async (
-  label: string,
-  did: string,
-  options?: { force?: boolean },
-) => {
+export const addToList = async (label: string, did: string) => {
   await isLoggedIn;
 
   const list = LISTS.find((l) => l.label === label);
@@ -25,12 +21,10 @@ export const addToList = async (
     return;
   }
 
-  if (!options?.force) {
-    const existingRkey = await getListItemRkey(label, did);
-    if (existingRkey) {
-      logger.info({ label: list.label, did }, "User already in list (per index)");
-      return;
-    }
+  const existingRkey = await getListItemRkey(label, did);
+  if (existingRkey) {
+    logger.info({ label: list.label, did }, "User already in list (per index)");
+    return;
   }
 
   logger.info({ label: list.label, did }, "Adding user to list");
