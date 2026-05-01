@@ -27,11 +27,10 @@ export const addToList = async (label: string, did: string) => {
     return;
   }
 
-  logger.info({ label: list.label, did }, "Adding user to list");
-
   const listUri = `at://${DID}/app.bsky.graph.list/${list.rkey}`;
 
   await limit(async () => {
+    logger.info({ label: list.label, did }, "Adding user to list");
     try {
       const response = await agent.com.atproto.repo.createRecord({
         collection: "app.bsky.graph.listitem",
