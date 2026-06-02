@@ -40,7 +40,7 @@ async function main() {
 async function shutdown() {
   logger.info("Shutting down gracefully");
 
-  stopFirehose();
+  await stopFirehose();
   await disconnectRedis();
 
   logger.info("Shutdown complete");

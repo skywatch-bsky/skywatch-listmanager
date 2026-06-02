@@ -87,6 +87,27 @@ export async function clearProcessed(
   }
 }
 
+export async function markAndClearProcessed(
+  did: string,
+  label: string,
+  neg: boolean,
+): Promise<void> {
+  try {
+    const markKey = getCacheKey(did, label, neg);
+    const clearKey = getCacheKey(did, label, !neg);
+    await redisClient
+      .multi()
+      .set(markKey, "1", { EX: 60 * 60 * 24 * 7 })
+      .del(clearKey)
+      .exec();
+  } catch (err) {
+    logger.warn(
+      { err, did, label, neg },
+      "Error in mark+clear pipeline",
+    );
+  }
+}
+
 function getListItemKey(label: string, did: string): string {
   return `listitem:${label}:${did}`;
 }

@@ -314,3 +314,51 @@ When processing a label event, also delete the **opposite** state key. This allo
 - [x] Graceful shutdown handling
 - [x] Comprehensive logging
 - [x] Portable and configurable
+
+---
+
+## Throughput Optimisation (2026-06-02)
+
+### Problem
+
+The listmanager is ~21,600 events behind at 0.04 events/sec (~5.7 days to catch up).
+The bottleneck is architectural, not language-level:
+
+1. `writeFileSync` in `saveCursor` blocks the event loop on every single message
+2. Three sequential Redis round-trips per event (`hasProcessed` → `markProcessed` → `clearProcessed`)
+3. No concurrent event processing — each event waits for the full cycle before the next begins
+4. No backpressure — if processing stalls the websocket keeps buffering into memory
+
+### Changes
+
+#### 1. Debounced cursor persistence (`firehose.ts`)
+- Replace `writeFileSync` on every message with async `writeFile`
+- Debounce to at most every 5 seconds
+- Track latest cursor in memory, flush on shutdown
+
+#### 2. Pipelined Redis operations (`redis.ts`)
+- Combine `markProcessed` + `clearProcessed` into a single `markAndClearProcessed` using Redis `multi`/`exec`
+- Both operations are independent — pipeline them atomically
+
+#### 3. Bounded concurrent event processing (`firehose.ts`)
+- New `event-processor.ts` module: a bounded async worker pool
+- Configurable concurrency (default 16, respects rate limiter's concurrency of 48)
+- Events enqueue into the pool; workers drain concurrently
+- `Promise.allSettled` semantics — one failure doesn't block others
+
+#### 4. Backpressure on the websocket (`firehose.ts`)
+- When the processing queue reaches high-water mark, pause the websocket (ws.close readyState check)
+- Resume when queue drains below low-water mark
+- Prevents unbounded memory growth during catch-up
+
+### Files Modified
+- `src/firehose.ts` — debounced cursor, backpressure integration, concurrent dispatch
+- `src/redis.ts` — add `markAndClearProcessed` pipeline
+- `src/event-processor.ts` — NEW: bounded async worker pool
+- `src/main.ts` — graceful shutdown flushes cursor
+
+### Files NOT Modified
+- `src/listmanager.ts` — API call logic is fine
+- `src/limits.ts` — rate limiter config is fine
+- `src/constants.ts` — no changes
+- `src/cli/*` — no changes
