@@ -17,8 +17,8 @@ type EventProcessorOptions = {
 
 const DEFAULT_OPTIONS: EventProcessorOptions = {
   concurrency: 16,
-  highWaterMark: 512,
-  lowWaterMark: 128,
+  highWaterMark: 16384,
+  lowWaterMark: 4096,
 };
 
 export function createEventProcessor(
