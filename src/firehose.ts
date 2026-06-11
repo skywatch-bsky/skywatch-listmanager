@@ -19,9 +19,13 @@ const MAX_RECONNECT_DELAY = 60000;
 const INITIAL_RECONNECT_DELAY = 1000;
 const CURSOR_FILE = "./cursor.txt";
 const CURSOR_FLUSH_INTERVAL_MS = 5000;
+const STALE_TIMEOUT_MS = 5 * 60 * 1000;
+const WATCHDOG_INTERVAL_MS = 30000;
 
 let cursorDirty = false;
 let cursorFlushTimer: NodeJS.Timeout | null = null;
+let lastActivityAt = 0;
+let watchdogTimer: NodeJS.Timeout | null = null;
 
 function getReconnectDelay(): number {
   const delay = Math.min(
@@ -200,26 +204,69 @@ function connect(): void {
   const url = cursor ? `${WSS_URL}?cursor=${cursor}` : WSS_URL;
   logger.info({ url, cursor }, "Connecting to firehose");
 
-  ws = new WebSocket(url);
+  lastActivityAt = Date.now();
+  const socket = new WebSocket(url);
+  ws = socket;
 
-  ws.addEventListener("open", () => {
+  socket.addEventListener("open", () => {
+    if (ws !== socket) return;
     logger.info("Firehose connection established");
+    lastActivityAt = Date.now();
     reconnectAttempts = 0;
     backpressurePaused = false;
   });
 
-  ws.addEventListener("message", (event) => {
+  socket.addEventListener("message", (event) => {
+    if (ws !== socket) return;
+    lastActivityAt = Date.now();
     parseMessage(event.data);
   });
 
-  ws.addEventListener("error", (event) => {
+  socket.addEventListener("error", (event) => {
+    if (ws !== socket) return;
     logger.error({ event }, "Firehose WebSocket error");
   });
 
-  ws.addEventListener("close", (event) => {
+  socket.addEventListener("close", (event) => {
+    if (ws !== socket) return;
+    ws = null;
     logger.warn({ code: event.code, reason: event.reason }, "Firehose connection closed");
     scheduleReconnect();
   });
+}
+
+function forceReconnect(): void {
+  const stale = ws;
+  ws = null;
+  if (stale) {
+    try {
+      stale.close(4002, "stale connection");
+    } catch (err) {
+      logger.warn({ err }, "Error closing stale connection");
+    }
+  }
+  connect();
+}
+
+function startWatchdog(): void {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    if (!ws) return;
+    const idleMs = Date.now() - lastActivityAt;
+    if (idleMs < STALE_TIMEOUT_MS) return;
+    logger.warn(
+      { idleMs, readyState: ws.readyState, cursor },
+      "No firehose activity within stale timeout, forcing reconnect",
+    );
+    forceReconnect();
+  }, WATCHDOG_INTERVAL_MS);
+}
+
+function stopWatchdog(): void {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
 }
 
 function scheduleReconnect(): void {
@@ -253,6 +300,7 @@ export function startFirehose(): void {
   });
 
   startCursorFlush();
+  startWatchdog();
   connect();
 }
 
@@ -261,6 +309,8 @@ export async function stopFirehose(): Promise<void> {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
   }
+
+  stopWatchdog();
 
   if (ws) {
     logger.info("Closing firehose connection");
