@@ -1,4 +1,4 @@
-import { login } from "../agent.js";
+import { ensureLoggedIn } from "../agent.js";
 import { LISTS } from "../constants.js";
 import { addToList } from "../listmanager.js";
 import { logger } from "../logger.js";
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
 
   try {
     await connectRedis();
-    await login();
+    await ensureLoggedIn();
     logger.info("Authenticated with Bluesky");
 
     await addToList(label, did);

@@ -1,4 +1,4 @@
-import { login } from "./agent.js";
+import { ensureLoggedIn } from "./agent.js";
 import { validateConfig } from "./config.js";
 import { LISTS } from "./constants.js";
 import { startFirehose, stopFirehose } from "./firehose.js";
@@ -24,7 +24,7 @@ async function main() {
     await connectRedis();
 
     logger.info("Authenticating with Bluesky");
-    await login();
+    await ensureLoggedIn();
     logger.info("Successfully authenticated with Bluesky");
 
     logger.info("Starting firehose subscriber");

@@ -2,16 +2,28 @@ import { setGlobalDispatcher, Agent as Agent } from "undici";
 setGlobalDispatcher(new Agent({ connect: { timeout: 20_000 } }));
 import { BSKY_HANDLE, BSKY_PASSWORD, PDS } from "./config.js";
 import { AtpAgent } from "@atproto/api";
+import { authLimit } from "./limits.js";
 
 export const agent = new AtpAgent({
   service: `https://${PDS}`,
 });
-export const login = () =>
-  agent.login({
-    identifier: BSKY_HANDLE,
-    password: BSKY_PASSWORD,
-  });
 
-export const isLoggedIn = login()
-  .then(() => true)
-  .catch(() => false);
+let loginPromise: Promise<void> | null = null;
+
+export function ensureLoggedIn(): Promise<void> {
+  if (!loginPromise) {
+    loginPromise = authLimit
+      .schedule(() =>
+        agent.login({
+          identifier: BSKY_HANDLE,
+          password: BSKY_PASSWORD,
+        }),
+      )
+      .then(() => undefined)
+      .catch((err) => {
+        loginPromise = null;
+        throw err;
+      });
+  }
+  return loginPromise;
+}
