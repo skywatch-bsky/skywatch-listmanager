@@ -51,12 +51,13 @@ export const addToList = async (label: string, did: string) => {
   } catch (e: any) {
     if (e.message?.includes("RecordAlreadyExists")) {
       logger.info({ label: list.label, did }, "User already in list");
-    } else {
-      logger.error(
-        { err: e, label: list.label, did },
-        "Failed to add user to list",
-      );
+      return;
     }
+    logger.error(
+      { err: e, label: list.label, did },
+      "Failed to add user to list",
+    );
+    throw e;
   }
 };
 
@@ -154,5 +155,6 @@ export const removeFromList = async (label: string, did: string) => {
       { err: e, label: list.label, did },
       "Failed to remove user from list (fallback)",
     );
+    throw e;
   }
 };
